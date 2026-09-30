@@ -1,0 +1,48 @@
+{
+  "name": "dsh-bazaar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "集市：按官方 dsh-plugin topic 浏览并安装 DeepSeek Harness 插件",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/leolee9086/dsh-bazaar.git"
+  },
+  "homepage": "https://github.com/leolee9086/dsh-bazaar#readme",
+  "bugs": {
+    "url": "https://github.com/leolee9086/dsh-bazaar/issues"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh-plugin",
+    "plugin-market"
+  ],
+  "exports": {
+    ".": "./src/host.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": []
+    }
+  },
+  "files": [
+    "src",
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "check": "node --check src/host.js"
+  },
+  "devDependencies": {
+    "react-dom": "18.3.1",
+    "tsdown": "^0.22.2"
+  }
+}

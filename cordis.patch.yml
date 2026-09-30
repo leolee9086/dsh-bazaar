@@ -1,0 +1,4 @@
+# 把集市插进 profile 的组合里。只 insert 自己一行，不覆盖任何别人的配置。
+- insert:
+    - id: dsh-bazaar
+      name: dsh-bazaar
