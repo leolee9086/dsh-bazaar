@@ -281,6 +281,7 @@ export function BazaarPanel() {
         <h2 style={styles.title}>集市</h2>
         <span style={styles.note}>
           按官方 <code>dsh-plugin</code> 话题收录{data?.total ? ` · 共 ${data.total} 个仓库` : ''}
+          {` · 按${sort === 'stars' ? ' star' : '最近更新'}排序`}
           {gh.status === 'ready' && gh.login !== '' ? ` · fork 会落在 ${gh.login}` : ''}
         </span>
       </div>

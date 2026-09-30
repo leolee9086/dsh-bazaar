@@ -92,32 +92,72 @@ function toItem(repo) {
 }
 
 /**
- * 按官方 topic 搜仓库。
- * @param {string} query 关键词，空串表示不带关键词（即最近/最热的那一批）
- * @param {{sort?: string, page?: number}} options
+ * 把搜索响应压成列表要的东西；不是搜索结果就返回 null。
+ * @param {string} text
+ */
+function parseSearchBody(text) {
+  try {
+    const body = JSON.parse(text)
+    const items = Array.isArray(body?.items) ? body.items.map(toItem) : []
+    return { items, total: Number.isFinite(body?.total_count) ? body.total_count : items.length }
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 列表顺序。两种都在本地排：拉回来的那一页够看两种顺序，切换排序不该再打一次 GitHub。
+ *
+ * `updated` 用 pushedAt 降序，同一时刻再按 star 降序——没有这个次级次序，
+ * 同一天推送的一批仓库之间就只剩 GitHub 的返回顺序，看起来是乱的。
+ * @param {{stars: number, pushedAt: string | null}[]} items
+ * @param {string} sort
+ */
+function sortItems(items, sort) {
+  const byPushed = (a, b) => String(b.pushedAt ?? '').localeCompare(String(a.pushedAt ?? '')) || b.stars - a.stars
+  const copy = [...items]
+  copy.sort(sort === 'updated' ? byPushed : (a, b) => b.stars - a.stars || byPushed(a, b))
+  return copy
+}
+
+/**
+ * 按官方 topic 搜仓库，固定按 star 拉一页。
+ *
+ * 先走 gh：它带着自己的登录态，搜索额度是认证后的（每小时 5000 次），而匿名 HTTP
+ * 只有每分钟十次——浏览几下就用光了，之后整个列表都是空的。没有 gh 才退回匿名请求。
+ * @param {string} query 关键词，空串表示不带关键词（即最热的那一批）
+ * @param {number} page
  * @param {AbortSignal} signal
  */
-async function searchTopic(query, options, signal) {
+async function searchTopic(query, page, signal) {
   const parts = [`topic:${OFFICIAL_TOPIC}`]
   if (query.trim() !== '') parts.push(query.trim())
+  const params = new URLSearchParams({
+    q: parts.join(' '),
+    sort: 'stars',
+    order: 'desc',
+    per_page: String(PAGE_SIZE),
+    page: String(Math.max(1, Math.trunc(page))),
+  })
+  const viaGh = await runGh(['api', `search/repositories?${params.toString()}`], { timeoutMs: 40000 })
+  if (viaGh.code === 0) {
+    const body = parseSearchBody(viaGh.stdout)
+    if (body !== null) return body
+  }
   const url = new URL('https://api.github.com/search/repositories')
-  url.searchParams.set('q', parts.join(' '))
-  const sort = options.sort === 'updated' ? 'updated' : 'stars'
-  url.searchParams.set('sort', sort)
-  url.searchParams.set('order', 'desc')
-  url.searchParams.set('per_page', String(PAGE_SIZE))
-  url.searchParams.set('page', String(Math.max(1, Math.trunc(options.page ?? 1))))
+  url.search = params.toString()
   const response = await fetch(url, {
     headers: { accept: 'application/vnd.github+json', 'user-agent': 'dsh-bazaar' },
     signal,
   })
   if (!response.ok) {
     const detail = await response.text().catch(() => '')
-    throw new Error(`GitHub ${response.status}: ${detail.slice(0, 200)}`)
+    const suffix = detail === '' ? '' : `: ${detail.slice(0, 200)}`
+    throw new Error(`GitHub ${response.status}${suffix}`)
   }
-  const body = await response.json()
-  const items = Array.isArray(body?.items) ? body.items.map(toItem) : []
-  return { items, total: Number.isFinite(body?.total_count) ? body.total_count : items.length }
+  const body = parseSearchBody(await response.text())
+  if (body === null) throw new Error('GitHub 返回的不是搜索结果')
+  return body
 }
 
 /**
@@ -208,16 +248,66 @@ const GH_PROBE_MS = 30 * 1000
 let ghProbe = { at: 0, value: undefined }
 
 /**
- * 跑一条 gh 命令。`shell: false`：仓库名来自界面，shell 会把它当代码。
+ * gh 可执行文件的候选位置。
+ *
+ * 只有第一个走 PATH。GUI 启动的宿主进程拿到的 PATH 常常不含 GitHub CLI 的安装目录
+ * （本机实测就是这样：终端里 `gh` 好用，宿主进程里 spawn 直接 ENOENT），
+ * 于是「装了 gh」被误判成「没装」。其余是这个工具在各平台的常规安装位置。
+ */
+const GH_CANDIDATES = [
+  'gh',
+  'C:\\Program Files\\GitHub CLI\\gh.exe',
+  'C:\\Program Files (x86)\\GitHub CLI\\gh.exe',
+  '/opt/homebrew/bin/gh',
+  '/usr/local/bin/gh',
+  '/usr/bin/gh',
+]
+
+/** 找到的 gh 路径；`undefined` 还没找过，`null` 找过但没有。 */
+let ghPath
+
+/**
+ * 找到能用的 gh。只找一次，之后记住——它不会中途换地方。
+ * @returns {Promise<string | null>}
+ */
+async function ghCommand() {
+  if (ghPath !== undefined) return ghPath
+  for (const candidate of GH_CANDIDATES) {
+    const probe = await runGhAt(candidate, ['--version'], { timeoutMs: 10000 })
+    if (probe.code === 0) {
+      ghPath = candidate
+      return candidate
+    }
+  }
+  ghPath = null
+  return null
+}
+
+/**
+ * 跑一条 gh 命令，用找到的那个可执行文件。`shell: false`：仓库名来自界面，
+ * shell 会把它当代码。
  * @param {string[]} args
  * @param {{timeoutMs?: number}} [options]
  * @returns {Promise<{code: number|null, stdout: string, stderr: string}>}
  */
-function runGh(args, options = {}) {
+async function runGh(args, options = {}) {
+  const command = await ghCommand()
+  if (command === null) return { code: 127, stdout: '', stderr: '找不到 gh 可执行文件' }
+  return runGhAt(command, args, options)
+}
+
+/**
+ * 用指定的可执行文件跑一条 gh 命令。
+ * @param {string} executable
+ * @param {string[]} args
+ * @param {{timeoutMs?: number}} [options]
+ * @returns {Promise<{code: number|null, stdout: string, stderr: string}>}
+ */
+function runGhAt(executable, args, options = {}) {
   return new Promise((resolve) => {
     let child
     try {
-      child = spawn('gh', args, { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
+      child = spawn(executable, args, { shell: false, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] })
     } catch (error) {
       resolve({ code: 127, stdout: '', stderr: String(error?.message ?? error) })
       return
@@ -384,19 +474,20 @@ export function apply(ctx) {
       }
       const url = new URL(request.url ?? '/', 'http://localhost')
       const query = url.searchParams.get('q') ?? ''
-      const sort = url.searchParams.get('sort') ?? 'stars'
+      const sort = url.searchParams.get('sort') === 'updated' ? 'updated' : 'stars'
       const page = Number.parseInt(url.searchParams.get('page') ?? '1', 10) || 1
-      const key = `${query}|${sort}|${page}`
+      // 缓存不含排序：一份数据两种顺序共用，所以切换排序不会再打 GitHub。
+      const key = `${query}|${page}`
       const hit = cache.get(key)
       if (hit !== undefined && Date.now() - hit.at < CACHE_MS) {
-        send(200, hit.body)
+        send(200, { ...hit.body, sort, items: sortItems(hit.body.items, sort) })
         return
       }
       const controller = new AbortController()
       request.on('close', () => { controller.abort() })
       try {
         const [topic, ...subscriptions] = await Promise.all([
-          searchTopic(query, { sort, page }, controller.signal),
+          searchTopic(query, page, controller.signal),
           ...(await readSubscriptions(ctx)).map(u => readSubscription(u, controller.signal)),
         ])
         // 订阅来的地址只作为「还有这些」附在结果里：它们是仓库名，不是搜索命中，
@@ -404,7 +495,8 @@ export function apply(ctx) {
         const subscribed = [...new Set(subscriptions.flatMap(s => s.repos))]
         const body = {
           topic: OFFICIAL_TOPIC,
-          items: topic.items,
+          sort,
+          items: sortItems(topic.items, sort),
           total: topic.total,
           subscribed,
           subscriptions: subscriptions.map(s => ({ url: s.url, count: s.repos.length, ...(s.error === undefined ? {} : { error: s.error }) })),
