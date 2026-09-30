@@ -33,6 +33,18 @@ function formatDay(iso) {
   return typeof iso === 'string' ? iso.slice(0, 10) : '—'
 }
 
+/**
+ * fork 按钮的鼠标提示：说清楚它现在为什么点不了。
+ * 「没探测到」和「确认没有」分开说，因为前者可能只是宿主还没重启、
+ * 那条能力路由还不存在——把自己的问题说成用户没装工具是错的。
+ */
+function ghHint(gh) {
+  if (gh.status === 'ready') return gh.login === '' ? 'fork 到你的 GitHub 账号再安装' : `fork 到 ${gh.login} 再安装`
+  if (gh.status === 'missing') return '需要 CLI 工具支持'
+  if (gh.status === 'unknown') return '暂时无法确认本机是否有 gh'
+  return '正在检测 gh…'
+}
+
 /** 安装阶段的说法，取自宿主自己的 install-state。 */
 function phaseLabel(phase) {
   return {
@@ -55,6 +67,7 @@ const styles = {
   controls: { display: 'flex', gap: 8, alignItems: 'center' },
   input: { flex: '1 1 auto', minWidth: 180, padding: '8px 12px', fontSize: 13, borderRadius: 8, border: BORDER, background: 'transparent', color: 'inherit' },
   button: { padding: '7px 14px', fontSize: 13, borderRadius: 8, border: BORDER, background: 'transparent', color: 'inherit', cursor: 'pointer', whiteSpace: 'nowrap' },
+  buttonDisabled: { padding: '7px 14px', fontSize: 13, borderRadius: 8, border: BORDER, background: 'transparent', color: 'inherit', cursor: 'not-allowed', whiteSpace: 'nowrap', opacity: 0.45 },
   buttonPrimary: { padding: '7px 14px', fontSize: 13, borderRadius: 8, border: '1px solid transparent', background: 'var(--dsw-alias-brand-primary, #4f6ef7)', color: '#fff', cursor: 'pointer', whiteSpace: 'nowrap' },
   list: { flex: '1 1 auto', minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingRight: 2 },
   card: { border: BORDER, borderRadius: 12, padding: '13px 15px', display: 'flex', gap: 14, alignItems: 'flex-start', background: 'var(--dsw-alias-bg-layer-1, transparent)' },
@@ -130,12 +143,13 @@ function RepoCard({ item, direct, forked, running, progress, gh, onInstall }) {
           onClick={() => { onInstall(item.repo, 'direct') }}
         >{direct?.status === 'done' ? '已安装' : direct?.status === 'installing' ? '安装中…' : '安装'}</button>
         <button
-          style={styles.button}
+          // 名字始终是它要做的事；能不能点是状态，不该改它的名字。
+          style={gh.status === 'ready' ? styles.button : styles.buttonDisabled}
           type="button"
-          disabled={gh === null || gh === false || forked?.status === 'busy' || forked?.status === 'installing' || forked?.status === 'done'}
-          title={gh === false ? '本机没有可用的 gh，先安装 GitHub CLI 并登录' : (gh?.login ? `fork 到 ${gh.login} 再安装` : '')}
+          disabled={gh.status !== 'ready' || forked?.status === 'busy' || forked?.status === 'installing' || forked?.status === 'done'}
+          title={ghHint(gh)}
           onClick={() => { onInstall(item.repo, 'fork') }}
-        >{forked?.status === 'done' ? '已装' : forked?.status === 'installing' ? '安装中…' : gh === false ? '需要 gh' : 'Fork 安装'}</button>
+        >{forked?.status === 'done' ? '已装' : forked?.status === 'installing' ? '安装中…' : 'Fork 安装'}</button>
       </div>
     </div>
   )
@@ -150,8 +164,11 @@ export function BazaarPanel() {
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(false)
   const [installs, setInstalls] = useState({})
-  /** `null` 还没探到；`false` 本机没有可用的 gh；`{login}` 可用。 */
-  const [gh, setGh] = useState(null)
+  /**
+   * gh 的可用性：`{status: 'probing' | 'ready' | 'missing' | 'unknown', login}`。
+   * 四种状态分开是有意的——「还没问到」不等于「没有」。
+   */
+  const [gh, setGh] = useState({ status: 'probing', login: '' })
   /** 正在跑的那一次安装：`{key, repo, requestId}`。宿主一次只跑一个。 */
   const [active, setActive] = useState(null)
   /** 轮询回来的安装详情：阶段与 pnpm 的输出。 */
@@ -189,10 +206,15 @@ export function BazaarPanel() {
     void (async () => {
       try {
         const response = await fetch('/dsh-bazaar/capabilities', { headers: { accept: 'application/json' } })
-        const body = response.ok ? await response.json() : null
-        if (alive) setGh(body?.gh === true ? { login: typeof body.login === 'string' ? body.login : '' } : false)
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const body = await response.json()
+        if (!alive) return
+        setGh(body?.gh === true
+          ? { status: 'ready', login: typeof body.login === 'string' ? body.login : '' }
+          : { status: 'missing', login: '' })
       } catch {
-        if (alive) setGh(false)
+        // 问不出来就问不出来，别替用户下结论。
+        if (alive) setGh({ status: 'unknown', login: '' })
       }
     })()
     return () => { alive = false }
@@ -259,7 +281,7 @@ export function BazaarPanel() {
         <h2 style={styles.title}>集市</h2>
         <span style={styles.note}>
           按官方 <code>dsh-plugin</code> 话题收录{data?.total ? ` · 共 ${data.total} 个仓库` : ''}
-          {gh?.login ? ` · fork 会落在 ${gh.login}` : ''}
+          {gh.status === 'ready' && gh.login !== '' ? ` · fork 会落在 ${gh.login}` : ''}
         </span>
       </div>
       <form style={styles.controls} onSubmit={(event) => { event.preventDefault(); setQuery(draft.trim()) }}>
