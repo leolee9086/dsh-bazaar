@@ -174,11 +174,12 @@ export function BazaarPanel() {
   /** 轮询回来的安装详情：阶段与 pnpm 的输出。 */
   const [progress, setProgress] = useState(null)
 
-  const load = useCallback(async (signal) => {
+  const load = useCallback(async (signal, force = false) => {
     setLoading(true)
     setError(null)
     try {
-      const response = await fetch(`/dsh-bazaar/list?q=${encodeURIComponent(query)}&sort=${sort}`, {
+      const suffix = force ? '&refresh=1' : ''
+      const response = await fetch(`/dsh-bazaar/list?q=${encodeURIComponent(query)}&sort=${sort}${suffix}`, {
         signal, headers: { accept: 'application/json' },
       })
       if (!response.ok) {
@@ -298,6 +299,13 @@ export function BazaarPanel() {
           type="button"
           onClick={() => { setSort(sort === 'stars' ? 'updated' : 'stars') }}
         >{sort === 'stars' ? '按 star' : '按最近更新'}</button>
+        <button
+          style={styles.button}
+          type="button"
+          disabled={loading}
+          title="重新问一次 GitHub，不用缓存里的那份"
+          onClick={() => { void load(undefined, true) }}
+        >{loading ? '刷新中…' : '刷新'}</button>
       </form>
       {error !== null && <div style={{ fontSize: 12, color: '#c0392b' }}>读取失败：{error}</div>}
       <div style={styles.list}>

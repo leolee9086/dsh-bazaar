@@ -478,7 +478,8 @@ export function apply(ctx) {
       const page = Number.parseInt(url.searchParams.get('page') ?? '1', 10) || 1
       // 缓存不含排序：一份数据两种顺序共用，所以切换排序不会再打 GitHub。
       const key = `${query}|${page}`
-      const hit = cache.get(key)
+      // 界面上的刷新按钮带 refresh=1：人点它就是要看这一刻的结果，不该拿缓存糊弄他。
+      const hit = url.searchParams.get('refresh') === '1' ? undefined : cache.get(key)
       if (hit !== undefined && Date.now() - hit.at < CACHE_MS) {
         send(200, { ...hit.body, sort, items: sortItems(hit.body.items, sort) })
         return
