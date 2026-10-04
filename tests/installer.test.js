@@ -11,6 +11,8 @@ import { createInstaller, INSTALL_TOOL } from '../src/install.js'
 import { TaskStore } from '../src/tasks.js'
 import { createCatalog } from '../src/catalog.js'
 import { registerDiscovery, SEARCH_TOOL, INSTALLED_TOOL, DISCOVERY_SECTION } from '../src/discovery.js'
+import { createPnpmController } from '../src/pnpm.js'
+import { registerPnpmCases } from './pnpm-cases.js'
 
 // The artifact suite consumes official public exports, never source aliases or service replicas.
 const root = process.env.DSH_TEST_ROOT
@@ -31,7 +33,7 @@ for (const [builtin, name] of [
   plugins[builtin] = (await official('bundle/base', `@deepseek-ai/dsh-${name}`)).default
 }
 
-async function fixture(t, { openTurn = true, live = false, ai = true, mode = 'direct', spec = 'github:example/uninstalled#keep-this-ref' } = {}) {
+async function fixture(t, { openTurn = true, live = false, ai = true, mode = 'direct', spec = 'github:example/uninstalled#keep-this-ref', packageManager } = {}) {
   const dir = await mkdtemp(join(fileURLToPath(new URL('../.test-build/', import.meta.url)), 'installer-'))
   await mkdir(join(dir, 'home'))
   let ctx
@@ -48,6 +50,7 @@ async function fixture(t, { openTurn = true, live = false, ai = true, mode = 'di
   const store = new TaskStore(join(dir, 'journal'))
   await store.load()
   let installer
+  let pnpm
   let forkCalls = 0
   const readyListeners = new Set()
   const catalog = createCatalog({
@@ -66,10 +69,11 @@ async function fixture(t, { openTurn = true, live = false, ai = true, mode = 'di
     inner.loader.builtins.timer = Timer
     inner.provide('profileContext', { name: 'test', dir, patchPath: join(dir, 'cordis.patch.yml'),
       installAnchor: join(dir, 'package.json'), cwd: dir, home: join(dir, 'home'), startedBundles: [], overlays: [],
-      telemetryDisabledEnv: undefined })
+      telemetryDisabledEnv: undefined, ...(packageManager ? { packageManager } : {}) })
     Object.assign(inner.loader.builtins, plugins, {
       'bazaar-installer': { name: 'bazaar-installer', apply(owner) {
         registerDiscovery(owner, catalog)
+        pnpm = createPnpmController(owner, store)
         installer = createInstaller(owner, store, async () => {
           forkCalls += 1
           throw new Error('A denied test request must not reach GitHub')
@@ -90,9 +94,11 @@ async function fixture(t, { openTurn = true, live = false, ai = true, mode = 'di
     assert.equal(forkCalls, 0)
     assert.equal(await readFile(join(dir, 'cordis.patch.yml'), 'utf8'), initialPatch)
   }
-  return { ctx, dir, agent, get task() { return store.latest() }, store, installer, execute, audit, unchanged, catalog,
+  return { ctx, dir, agent, get task() { return store.latest() }, store, installer, pnpm, execute, audit, unchanged, catalog,
     setSpec: value => { spec = value }, forkCalls: () => forkCalls }
 }
+
+registerPnpmCases(test, fixture)
 
 test('Agent search uses the browser catalog and installed query preserves the real manager list without mutations', async t => {
   const f = await fixture(t)

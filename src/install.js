@@ -161,7 +161,7 @@ export function createInstaller(ctx, store, forkAndPin) {
     closing = true
     await stop([...running])
     for (const task of store.list()) {
-      if (!task.done && !running.has(task.requestId)) await finish(task, 'interrupted', 'Bazaar unloaded before this request finished')
+      if (task.kind !== 'pnpm' && !task.done && !running.has(task.requestId)) await finish(task, 'interrupted', 'Bazaar unloaded before this request finished')
     }
     try { await store.save() }
     catch (error) { ctx.logger.warn('Could not persist bazaar tasks during unload', error) }

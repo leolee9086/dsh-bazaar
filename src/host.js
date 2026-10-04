@@ -5,6 +5,7 @@ import { TaskStore } from './tasks.js'
 import { createInstaller } from './install.js'
 import { createCatalog } from './catalog.js'
 import { registerDiscovery } from './discovery.js'
+import { createPnpmController } from './pnpm.js'
 
 export const name = 'dsh-bazaar'
 export const inject = ['webServer']
@@ -219,6 +220,7 @@ export async function apply(ctx) {
   const store = paths ? new TaskStore(paths.dir) : null
   if (store) await store.load()
   const installer = store ? createInstaller(ctx, store, forkAndPin) : null
+  const pnpm = store ? createPnpmController(ctx, store) : null
   const route = (path, method, handler) => ctx.webServer.register({
     kind: 'exact', path,
     handler: async (request, response) => {
@@ -230,7 +232,7 @@ export async function apply(ctx) {
       if (!connection) { send(503, { error: 'Browser authentication service unavailable' }); return }
       const rejection = connection.requestRejection(request)
       if (rejection) { send(rejection, { error: 'Browser authentication required' }); return }
-      if (request.method !== method) { send(405, { error: 'method not allowed' }); return }
+      if (!(Array.isArray(method) ? method : [method]).includes(request.method)) { send(405, { error: 'method not allowed' }); return }
       try { await handler(request, send) }
       catch (error) { send(500, { error: error instanceof Error ? error.message : String(error) }) }
     },
@@ -253,6 +255,22 @@ export async function apply(ctx) {
     const force = new URL(request.url, 'http://localhost').searchParams.get('refresh') === '1'
     send(200, { gh: await ghIdentity(force, AbortSignal.timeout(80000)), installation: installer?.available() === true,
       approval: 'agent-only', buildScripts: 'separate-explicit-approval' })
+  })
+  route('/dsh-bazaar/pnpm', ['GET', 'POST'], async (request, send) => {
+    if (!pnpm?.available()) { send(503, { error: 'Current profile unavailable' }); return }
+    if (request.method === 'GET') { send(200, await pnpm.read()); return }
+    const mutation = await readMutation(request)
+    if (!mutation.ok) { send(mutation.status, { error: mutation.error }); return }
+    if (!pnpm?.available()) { send(503, { error: 'Current profile unavailable' }); return }
+    if (Object.keys(mutation.value).length !== 1 || !Object.hasOwn(mutation.value, 'version')) {
+      send(400, { error: 'pnpm selection accepts only version' }); return
+    }
+    const busy = store.busy()
+    if (busy) { send(409, { error: 'A profile operation is already pending', requestId: busy.requestId }); return }
+    try {
+      const task = await pnpm.begin(mutation.value.version)
+      send(200, { requestId: task.requestId, install: task })
+    } catch (error) { send(400, { error: error.message }) }
   })
   route('/dsh-bazaar/sessions', 'GET', async (_request, send) => {
     const controller = ctx.get('sessionController')
@@ -294,7 +312,8 @@ export async function apply(ctx) {
   route('/dsh-bazaar/cancel-install', 'POST', async (request, send) => {
     const mutation = await readMutation(request)
     if (!mutation.ok) { send(mutation.status, { error: mutation.error }); return }
-    if (!installer) { send(503, { error: 'Installation service unavailable' }); return }
-    send(200, await installer.cancel(mutation.value.requestId))
+    const controller = store?.get(mutation.value.requestId)?.kind === 'pnpm' ? pnpm : installer
+    if (!controller) { send(503, { error: 'Profile operation service unavailable' }); return }
+    send(200, await controller.cancel(mutation.value.requestId))
   })
 }

@@ -71,6 +71,8 @@ async function request(path, { signal, ...options } = {}) {
     'install-status': () => Array.isArray(body?.tasks) && Object.hasOwn(body, 'install') && Object.hasOwn(body, 'busy'),
     capabilities: () => typeof body?.gh?.status === 'string' && typeof body?.installation === 'boolean' && body?.approval === 'agent-only',
     installed: () => Array.isArray(body?.bundles),
+    pnpm: () => options.method === 'POST' ? typeof body?.requestId === 'string' && body.install?.requestId === body.requestId
+      : Object.hasOwn(body, 'version') && typeof body?.recommended === 'string' && Array.isArray(body?.localLinks),
     list: () => Array.isArray(body?.items) && Array.isArray(body?.subscriptions) && Array.isArray(body?.subscribed),
   }[endpoint]
   if (valid && !valid()) throw new Error(`${t('hostProtocolError')} (${endpoint})`)
@@ -125,6 +127,7 @@ function TaskDetail({ task, bundles, onCancel, cancelling }) {
       {bundleName && <><dt>{t('package')}</dt><dd>{bundleName} · {bundles === null ? t('inspecting')
         : bundle?.installed ? `${t('installed')} · ${bundle.enabled ? t('enabled') : t('disabled')}` : t('notInstalled')}</dd></>}
       {result && <><dt>{t('managerResult')}</dt><dd>{result.application} · {result.changed ? t('changed') : t('unchanged')}</dd></>}
+      {task.pnpmResult && <><dt>{t('pnpmSelection')}</dt><dd>{task.pnpmResult.selection.version ?? t('pnpmLauncher')} · {task.pnpmResult.changed ? t('changed') : t('unchanged')}</dd></>}
     </dl>
     <Notice label={t('diagnostics')} error={task.error} />
     <Notice label={t('journalError')} error={task.journalError} />
@@ -135,6 +138,56 @@ function TaskDetail({ task, bundles, onCancel, cancelling }) {
       {result?.packageResult?.logPath && <code>{result.packageResult.logPath}</code>}
     </details>
     {result && <details><summary>{t('diagnostics')}</summary><pre>{JSON.stringify(result, null, 2)}</pre></details>}
+  </section>
+}
+
+/** A saved declaration selects future installs; it does not claim a version already executed. */
+function PnpmSettings({ disabled, onTask, revision }) {
+  const [selection, setSelection] = useState(null)
+  const [version, setVersion] = useState('')
+  const [readError, setReadError] = useState(null)
+  const [mutationError, setMutationError] = useState(null)
+  const [saving, setSaving] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [refresh, setRefresh] = useState(0)
+  const gate = useRef(false)
+  useEffect(() => {
+    const abort = new AbortController()
+    setReadError(null)
+    setSelection(null)
+    void request('pnpm', { signal: abort.signal }).then(value => {
+      if (abort.signal.aborted) return
+      setSelection(value)
+      setVersion(value.version ?? value.recommended)
+    }).catch(failure => { if (!abort.signal.aborted) setReadError(failure.message) })
+    return () => abort.abort()
+  }, [revision, refresh])
+  const save = async target => {
+    if (gate.current || disabled || !selection) return
+    gate.current = true
+    setSaving(true)
+    setSaved(false)
+    setMutationError(null)
+    try {
+      const value = await request('pnpm', { method: 'POST', body: JSON.stringify({ version: target }) })
+      onTask(value.install)
+      if (value.install.phase !== 'configured') throw new Error(value.install.error ?? phaseLabel(value.install.phase))
+      setSaved(true)
+    } catch (failure) { setMutationError(failure.message) }
+    finally { setSaving(false); gate.current = false; setRefresh(value => value + 1) }
+  }
+  return <section className="bazaar-band" aria-label={t('pnpmTitle')}>
+    <h3>{t('pnpmTitle')}</h3>
+    <p className="bazaar-muted">{selection ? `${t('pnpmCurrent')}: ${selection.version ?? t('pnpmLauncher')}` : t('pnpmReading')}</p>
+    <form className="bazaar-controls" onSubmit={event => { event.preventDefault(); void save(version.trim()) }}>
+      <input aria-label={t('pnpmVersion')} value={version} onChange={event => setVersion(event.target.value)} placeholder="11.28.2" />
+      <button type="submit" disabled={disabled || saving || !selection || !/^\d+\.\d+\.\d+$/.test(version.trim())}>{saving ? t('pnpmSaving') : t('pnpmSave')}</button>
+      <button type="button" disabled={disabled || saving || !selection} onClick={() => void save(null)}>{t('pnpmDefault')}</button>
+    </form>
+    <p className="bazaar-muted">{t('pnpmHelp')}</p>
+    {selection?.localLinks?.length > 0 && <p className="bazaar-muted">{t('pnpmLinks')} {selection.localLinks.join(', ')}</p>}
+    {saved && <p role="status">{t('pnpmSaved')}</p>}
+    <Notice label={t('pnpmError')} error={mutationError || readError} retry={() => { setMutationError(null); setRefresh(value => value + 1) }} />
   </section>
 }
 
@@ -311,6 +364,9 @@ export function BazaarPanel() {
         <Notice label={t('subscriptions')} error={row.error} /></div>)}
       <div className="bazaar-subscriptions">{data.subscribed.map(repo => <a key={repo} href={`https://github.com/${repo}`} target="_blank" rel="noreferrer">{repo}</a>)}</div>
     </section>}
+    <PnpmSettings disabled={submitting || !statusReady || !!busy} revision={revision} onTask={value => {
+      setSelectedTask(value.requestId); setTask(value); setStatusReady(false); setStatusRevision(previous => previous + 1)
+    }} />
     <section className="bazaar-band"><div className="bazaar-task-head"><h3>{t('tasks')}</h3>
       <select aria-label={t('taskHistory')} value={selectedTask} onChange={event => { setSelectedTask(event.target.value); setTask(null) }}>
         <option value="">{t('latest')}</option>{[...tasks].reverse().map(row => <option key={row.requestId} value={row.requestId}>

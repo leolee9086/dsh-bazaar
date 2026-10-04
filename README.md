@@ -24,6 +24,16 @@ DeepSeek Harness 的独立插件集市。侧栏的「集市」打开主区视图
 
 包下载、锁文件恢复和 bundle 应用委托给官方 `ctx.pluginManager`。集市不追加构建脚本许可；`pendingBuilds` 保留在结果中，必须另行明确授权。已应用、需重启、配置覆盖、失败和取消分别显示。应用阶段不能取消；安装中的取消要等官方包管理器停止并完成恢复才确认。
 
+## pnpm 版本切换
+
+集市里的「安装使用的 pnpm」读取当前 profile 的版本声明，可以保存完整版本号或恢复启动器默认版本。推荐值 `11.28.2` 已在 Windows 桌面启动器与官方插件管理器中实测；保存不立即下载或运行 pnpm，后续官方包操作按声明选择版本，必要时下载该版本的可执行包。界面显示的是配置声明，实际执行版本以安装日志为准。
+
+Agent 使用 `bazaar_pnpm({action:"get"})` 只读查询；修改使用 `bazaar_pnpm({action:"set",version:"11.28.2"})`，恢复默认传 `version:null`。每次修改都经过正式审批，审批说明后续下载与 profile 内所有会话的影响；它不包含插件安装或构建脚本授权。已认证界面的主动保存直接执行人类命令，与安装共用任务、日志和忙状态。
+
+选择写入 profile 的 `package.json` 中 `devEngines.packageManager={name:"pnpm",version,onFail:"download"}`，并同步已有的 `pnpm@...` 旧式 `packageManager` 声明；恢复默认移除这两项。其他依赖、组合与运行时声明不变，`pnpm-workspace.yaml` 和构建许可不变。写入使用官方包管理器相同的 `package.json.lock`，占锁时报告忙，不抢锁；落盘前检测配置文本是否被外部编辑，发现变化则拒绝本次写入。
+
+本地 `link:` 依赖会在版本区域列出。pnpm 版本切换本身不能修复 Windows 跨盘链接替换：`11.28.2` 在 `hoisted` 布局下仍可触发 EPERM。本功能不会自动临时切换布局或重命名 Junction；此类迁移需另行处理。配置成功、安装成功与 Host 加载成功是独立的结果。
+
 ## 浏览与恢复
 
 Star 与最近更新排序交给 GitHub，不能拿一页 Star 命中伪装成全局更新时间排序。每页 100 条，最多访问 GitHub 搜索提供的前 1000 条；不完整和截断标记在界面显示。查询、排序、页码与订阅来源参与缓存，缓存五分钟，刷新会重新请求。GitHub CLI 查询失败后尝试原生 HTTPS；原生请求不会自动采用 CLI 的代理配置。
@@ -54,6 +64,8 @@ github:owner/third
 | `/dsh-bazaar/capabilities` | GET | CLI 状态、官方管理器是否可用、`approval=agent-only` 与单独构建脚本授权标记 |
 | `/dsh-bazaar/sessions` | GET | 兼容旧客户端的只读会话列表；当前界面不查询它 |
 | `/dsh-bazaar/installed` | GET | 官方 bundle 列表 |
+| `/dsh-bazaar/pnpm` | GET | 当前 pnpm 版本声明、推荐版本和本地 link 依赖；只读 |
+| `/dsh-bazaar/pnpm` | POST | `{version:"11.28.2"}` 或 `{version:null}`；提交人类版本选择，200 返回 `{requestId,install}`，终态与配置结果保存在任务中 |
 | `/dsh-bazaar/install` | POST | `{spec}`；提交人类的安装命令，202 返回 `{requestId,install}`，后台继续官方管理器操作 |
 | `/dsh-bazaar/fork-install` | POST | 同上，spec 必须为 `github:owner/repo#ref`，ref 可省略 |
 | `/dsh-bazaar/install-status` | GET | `requestId` 查指定任务，省略则查最新；同时返回全局忙状态和历史摘要 |
@@ -70,7 +82,7 @@ pnpm test
 DSH_TEST_ROOT=/path/to/built/deepseek-harness pnpm run test:integration
 ```
 
-PowerShell 中用 `$env:DSH_TEST_ROOT='D:/path/to/built/deepseek-harness'` 设置集成测试根目录。该套测试只消费官方构建产物的公开导出，测试临时配置和自行创建的本地插件，不调用模型 API，也不安装外部仓库。运行时代码不导入 Harness 实现。组件测试使用 HTTP 响应样本，不替代真实宿主验证。
+PowerShell 中用 `$env:DSH_TEST_ROOT='D:/path/to/built/deepseek-harness'` 设置集成测试根目录。该套测试只消费官方构建产物的公开导出，使用真实 Loader、工具、审批、包管理器与临时配置，不调用模型 API。默认安装用自行创建的本地插件；提供 `DSH_TEST_NODE` 与 `DSH_TEST_PNPM_ENTRY`（桌面 Node 与 pnpm 入口）后，还会通过真实启动器验证版本选择和 GitHub tag 安装。只验证版本切换可运行 `node --test --test-name-pattern=pnpm tests/installer.test.js`；未提供启动器路径时外部安装项会明确跳过。运行时代码不导入 Harness 实现。已有组件测试使用 HTTP 响应样本，不替代真实宿主验证。
 
 客户端通过 tsdown 打包，React 与 JSX runtime 由宿主模块表提供；Lucide 按需打包，许可见 [第三方声明](THIRD_PARTY_NOTICES.md)。宿主修改需要重启加载；仅构建客户端并不保证正在运行的 GUI 会自动更新。
 

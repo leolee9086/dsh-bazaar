@@ -21,6 +21,12 @@ const text = {
   enabled: '已启用', disabled: '未启用', changed: '已变更', unchanged: '未变更',
   managerResult: '包管理器结果', journalError: '任务记录保存失败，重启后可能无法恢复',
   hostProtocolError: '集市接口不兼容；若刚更新插件，请重启 Harness 后重试',
+  pnpmTitle: '安装使用的 pnpm', pnpmVersion: '固定版本', pnpmSave: '保存版本', pnpmDefault: '恢复默认',
+  pnpmCurrent: '当前版本声明', pnpmLauncher: '启动器默认版本', pnpmReading: '正在读取版本配置',
+  pnpmSaving: '正在保存版本', pnpmError: 'pnpm 配置未确认', pnpmSaved: '已保存，后续官方安装使用此版本',
+  pnpmHelp: '填写完整版本号，例如 11.28.2。下次官方安装按此声明选择 pnpm，必要时下载对应版本。',
+  pnpmLinks: '当前配置仍有本地链接。切换 pnpm 版本本身不能修复跨盘链接替换。',
+  pnpmSelection: 'pnpm 版本配置',
 }
 const phases = {
   'awaiting-session': '等待会话执行', 'awaiting-approval': '等待审批',
@@ -28,7 +34,7 @@ const phases = {
   applied: '已应用', 'restart-required': '已安装，需重启', overridden: '已安装，配置被覆盖',
   'awaiting-build-approval': '构建脚本待授权', failed: '失败', cancelled: '已取消',
   rejected: '审批已拒绝', 'approval-unavailable': '审批不可用', interrupted: '执行中断，结果未确认',
-  'unknown-result': '包管理器结果未确认',
+  'unknown-result': '包管理器结果未确认', configuring: '正在保存版本配置', configured: '版本配置已保存',
 }
 export const t = key => text[key] ?? key
 export const phaseLabel = phase => phases[phase] ?? phase

@@ -1,6 +1,6 @@
 {
   "name": "dsh-bazaar",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "description": "集市：按官方 dsh-plugin topic 浏览并安装 DeepSeek Harness 插件",
@@ -40,7 +40,7 @@
   ],
   "scripts": {
     "build": "tsdown",
-    "check": "node --check src/host.js && node --check src/catalog.js && node --check src/discovery.js && node --check src/install.js && node --check src/protocol.js && node --check src/tasks.js && node --check src/client/locales.js",
+    "check": "node --check src/host.js && node --check src/catalog.js && node --check src/discovery.js && node --check src/install.js && node --check src/pnpm.js && node --check src/protocol.js && node --check src/tasks.js && node --check src/client/locales.js",
     "test": "pnpm run build:test && node --test tests/protocol.test.js tests/catalog.test.js tests/tasks.test.js tests/panel.test.js",
     "build:test": "tsdown --config tests/tsdown.config.mjs",
     "test:integration": "pnpm run build:test && node --test tests/installer.test.js",
