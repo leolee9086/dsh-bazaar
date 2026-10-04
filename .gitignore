@@ -1,2 +1,4 @@
 node_modules/
 *.tsbuildinfo
+.test-build/
+test-results/

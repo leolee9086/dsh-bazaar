@@ -35,13 +35,23 @@
     "src",
     "lib",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "scripts": {
     "build": "tsdown",
-    "check": "node --check src/host.js"
+    "check": "node --check src/host.js && node --check src/catalog.js && node --check src/discovery.js && node --check src/install.js && node --check src/protocol.js && node --check src/tasks.js && node --check src/client/locales.js",
+    "test": "pnpm run build:test && node --test tests/protocol.test.js tests/catalog.test.js tests/tasks.test.js tests/panel.test.js",
+    "build:test": "tsdown --config tests/tsdown.config.mjs",
+    "test:integration": "pnpm run build:test && node --test tests/installer.test.js",
+    "test:visual": "tsdown --config tests/visual.config.mjs && node tests/visual-runner.js"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.3",
+    "jsdom": "^30.1.1",
+    "lucide-react": "^1.49.0",
+    "playwright": "^1.63.0",
+    "react": "18.3.1",
     "react-dom": "18.3.1",
     "tsdown": "^0.22.2"
   }

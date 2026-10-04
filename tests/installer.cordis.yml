@@ -1,0 +1,39 @@
+- id: llm
+  name: cordis:llm
+- id: sessions
+  name: cordis:sessions
+- id: projections
+  name: cordis:projections
+- id: system-prompt
+  name: cordis:prompt
+- id: tools
+  name: cordis:tools
+  config:
+    mode: native
+- id: agents
+  name: cordis:agents
+- id: agent-loop
+  name: cordis:loop
+  config:
+    agents: []
+- id: approval
+  name: cordis:approval
+  config:
+    policy: ask
+- id: timer
+  name: cordis:timer
+  disabled: true
+- id: hmr
+  name: cordis:hmr
+  disabled: true
+  config:
+    root: []
+    ignored: []
+    debounce: 0
+- id: plugin-manager
+  name: cordis:manager
+  config:
+    registry: https://registry.npmjs.org/
+    fallbackRegistries: []
+- id: bazaar-installer
+  name: cordis:bazaar-installer

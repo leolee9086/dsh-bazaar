@@ -10,6 +10,7 @@ export default defineConfig({
   outDir: 'lib',
   format: 'cjs',
   platform: 'browser',
+  inputOptions: { resolve: { mainFields: ['module', 'main'] } },
   target: 'es2022',
   dts: false,
   sourcemap: true,
